@@ -723,7 +723,7 @@ def get_logo():
 
 
 # ============ CUT OFF DATE (edit this each month) ============
-CUT_OFF_DATE = "31 September"
+CUT_OFF_DATE = "31-July-2027"
 
 # ============ SIDEBAR WITH LOGO (TOP) ============
 with st.sidebar:
