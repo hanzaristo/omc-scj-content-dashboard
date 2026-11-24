@@ -88,7 +88,7 @@ def get_logo():
 
 
 # ============ CUT OFF DATE (edit this each month) ============
-CUT_OFF_DATE = "31 September"
+CUT_OFF_DATE = "31 June"
 
 # ============ LOGO (SIDEBAR + COLLAPSED STATE, CLICKABLE) ============
 LOGO_LINK = "https://omc-scj-analytics-hub.netlify.app/"
