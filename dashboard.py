@@ -34,6 +34,25 @@ html, body, .stApp,
     font-family: 'Poppins', sans-serif;
 }
 
+/* Hide top-right toolbar, deploy/fork menu, header decoration, and viewer badge */
+div[data-testid="stToolbar"],
+div[data-testid="stDecoration"],
+div[data-testid="stStatusWidget"],
+#MainMenu,
+footer,
+div[class*="viewerBadge"],
+a[class*="viewerBadge"],
+.viewerBadge_container__r5tak,
+.styles_viewerBadge__CvC9N {
+    display: none !important;
+    visibility: hidden !important;
+}
+
+/* Keep top header transparent so sidebar expand arrow still works when collapsed */
+header[data-testid="stHeader"] {
+    background: transparent !important;
+}
+
 /* Sidebar: soft tinted background with a gradient edge */
 section[data-testid="stSidebar"] {
     background: linear-gradient(180deg, #f3f5fd 0%, #ffffff 100%);
@@ -265,13 +284,6 @@ if 'Creator_Type' in df.columns:
 
 
 # ============ CONVERT DATA TYPES ============
-# Currency/count fields: some Excel exports (especially after merging
-# multiple sheets) use a period as the thousands separator (e.g.
-# "3.475.000"), not just a comma. If we only strip commas, values like
-# that fail to parse and silently become NaN -- which is what was making
-# Actual_Spends_IDR (and therefore Spend/CPV) collapse to 0. Strip BOTH
-# separators here since these are whole-rupiah / whole-count fields with
-# no decimals to preserve.
 currency_count_cols = [
     'Followers_Number',
     'Actual_Spends_IDR',
@@ -297,11 +309,6 @@ for col in currency_count_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
 
-# Percent fields: cleaning left exactly as before (comma stripped, not
-# converted to a decimal point). This preserves the existing ~100x scale
-# these values end up at, which is already compensated for everywhere
-# ER/VR/ER_Views are displayed elsewhere in this file (KPI card, Top 10
-# table, KOL search). Changing this here would silently break those.
 percent_cols = [
     'ER',
     'ER_Views',
@@ -324,8 +331,6 @@ df_columns_debug = list(df.columns)
 raw_month_values = []
 
 # ============ FIX: CLEAN AND PARSE MONTHS ============
-# Accepts formats like "Jan-26", "Nov-26", "November 2026", "2026-11",
-# "01/11/2026". Rows whose month can't be read are dropped (junk rows).
 if 'Month' in df.columns:
     raw_month_values = df['Month'].astype(str).str.strip().unique()[:10].tolist()
     month_str = df['Month'].astype(str).str.strip()
@@ -349,7 +354,6 @@ if 'Month' in df.columns:
     # Normalise everything to the 1st of the month
     df['Month'] = parsed.dt.to_period('M').dt.to_timestamp()
     df = df[df['Month'].notna()]
-
 
 
 # ============ DIAGNOSTICS: NOTHING SURVIVED CLEANING ============
@@ -396,11 +400,6 @@ if 'KOL_Name' in df.columns:
 
 
 # ============ SIDEBAR FILTERS (MONTH + TIER + CREATOR TYPE) ============
-# Behaviour of the multiselects:
-#  * "Select All" alone      -> everything is included (only that one tag shows)
-#  * pick a specific item    -> "Select All" is removed automatically
-#  * pick "Select All" again -> every other item is cleared, only "Select All" stays
-#  * clear everything / manually pick every item -> back to "Select All"
 SELECT_ALL = 'Select All'
 
 
@@ -412,13 +411,10 @@ def normalize_multiselect(key, all_items):
     if not current:
         new = [SELECT_ALL]
     elif SELECT_ALL in current and SELECT_ALL not in previous:
-        # "Select All" was just clicked -> keep only it
         new = [SELECT_ALL]
     elif SELECT_ALL in current and len(current) > 1:
-        # a specific item was picked while "Select All" was active -> drop it
         new = [x for x in current if x != SELECT_ALL]
     elif set(current) == set(all_items):
-        # every item picked one by one -> collapse to "Select All"
         new = [SELECT_ALL]
     else:
         new = current
@@ -469,7 +465,6 @@ with st.sidebar:
                 .isin(selected_months)
             ]
 
-
     # ============ FILTER BY TIER ============
     if 'Tier' in df.columns:
 
@@ -495,7 +490,6 @@ with st.sidebar:
                 filtered_df['Tier'].isin(selected_tiers)
             ]
 
-
     # ============ FILTER BY CREATOR TYPE ============
     if 'Creator_Type' in df.columns:
 
@@ -520,7 +514,6 @@ with st.sidebar:
             filtered_df = filtered_df[
                 filtered_df['Creator_Type'].isin(selected_creator_types)
             ]
-
 
     # ============ CLEAR ALL FILTERS ============
     st.button(
@@ -614,7 +607,6 @@ def create_bar_chart(data, x_col, y_col, color=None, value_format=',.0f', y_titl
 
     df.columns = [x_col, y_col]
 
-    # Soft vertical gradient (bright blue -> navy) unless a flat color is given
     bar_fill = color if color else alt.Gradient(
         gradient='linear',
         stops=[
@@ -702,11 +694,6 @@ def create_bar_chart(data, x_col, y_col, color=None, value_format=',.0f', y_titl
 
 
 # ============ RESPONSIVE STACKED BAR (pure HTML/CSS) ============
-# The horizontal stacked charts are drawn with HTML + CSS instead of a
-# canvas chart. Widths are percentages, so they follow the container
-# exactly when the window is resized or the page is zoomed in/out, and a
-# segment's % label is hidden by a CSS container query whenever its
-# segment gets too narrow to hold it.
 st.markdown("""
 <style>
 .sb-wrap { width: 100%; margin: 6px 0 10px 0; }
@@ -929,11 +916,6 @@ if 'KOL_Name' in filtered_df.columns:
         regex=False
     )
 
-    # Lowercase before counting uniques: KOL handles are case-insensitive
-    # on the actual platforms (e.g. "Ninitata" and "ninitata" are the same
-    # account), and Excel's UNIQUE() already treats them as one entry by
-    # default. Without this, pandas' case-sensitive nunique() overcounts
-    # any KOL whose name appears with inconsistent capitalization.
     kol_cleaned = kol_cleaned.str.lower()
 
     total_kols = kol_cleaned.nunique()
@@ -956,7 +938,6 @@ else:
 
 
 # ============ VIEW RATE (Views / Followers Number) ============
-# Same approach as ER: sum of views / sum of followers
 if (
     'Followers_Number' in filtered_df.columns
     and 'Views' in filtered_df.columns
@@ -1079,7 +1060,6 @@ METRIC_TITLES = {
     'ER': 'Engagement Rate (ER) by Month'
 }
 
-# Count / amount metrics are drawn as grouped bars, % metrics as lines
 LINE_METRICS = ['VR', 'ER']
 
 METRIC_COLORS = {
@@ -1095,12 +1075,6 @@ MAX_METRICS = 3
 
 
 def compute_monthly_metric(data, metric):
-    """Value of the chosen metric for each Month (None if a needed column is missing).
-
-    VR and ER are follower-weighted averages for the month
-    (sum of views or engagement / sum of followers), the same formula as
-    the KPI cards, so a single-month view matches the cards exactly.
-    """
     g = data.groupby('Month')
 
     def safe_ratio(num, den):
@@ -1146,12 +1120,6 @@ def compute_monthly_metric(data, metric):
 
 
 def create_multi_metric_chart(long_df, month_order, metric_order):
-    """Grouped bars (counts / amounts) + lines (% metrics) in one chart.
-
-    The y axis is hidden: each metric is drawn on its own 0-to-peak scale
-    (the 'Scaled' column), and the real value is shown as a label and in
-    the tooltip. This keeps metrics with very different sizes readable.
-    """
     n_bars = sum(1 for m in metric_order if m not in LINE_METRICS)
 
     if len(metric_order) == 1:
@@ -1275,11 +1243,6 @@ def create_multi_metric_chart(long_df, month_order, metric_order):
     )
 
 
-# ---- Which metrics may be combined -------------------------------------
-# Metrics that share a unit share one scale, so they stay comparable:
-#   money = Spend | views = Views | count = # of KOLs + # of Posts | rate = VR + ER
-# A chart may hold at most ONE bar group (money / views / count) plus the
-# % lines, and at most MAX_METRICS metrics in total.
 METRIC_SCALE_GROUP = {
     'Spend': 'money',
     'Views': 'views',
@@ -1368,7 +1331,6 @@ else:
         if series is not None and not series.empty:
             series_by_metric[metric] = series.sort_index()
 
-    # One peak per scale group (metrics in the same group share a scale)
     group_peak = {}
 
     for metric, series in series_by_metric.items():
@@ -1385,8 +1347,6 @@ else:
         is_line = metric in LINE_METRICS
         peak = group_peak[METRIC_SCALE_GROUP[metric]]
 
-        # Bars use up to 80% of the height and lines up to 95%, so line
-        # labels are less likely to collide with bar labels.
         top = 0.95 if is_line else 0.80
         scaled = (series / peak * top) if peak and peak > 0 else series * 0
 
@@ -1464,7 +1424,6 @@ if (
         .sum()
     )
 
-    # CALCULATE MONTHLY TOTAL
     month_totals = (
         tier_month_data
         .groupby('Month', as_index=False)['Actual_Spends_IDR']
@@ -1481,7 +1440,6 @@ if (
         on='Month'
     )
 
-    # CALCULATE PERCENTAGE
     tier_month_data['Percentage'] = (
         tier_month_data['Actual_Spends_IDR']
         / tier_month_data['Total_Spend']
@@ -1491,7 +1449,7 @@ if (
     tier_month_data['Percentage'] = (
         tier_month_data['Percentage']
         .round(0)
-        .fillna(0)  # guard against NaN from a 0-total group (0/0)
+        .fillna(0)
     )
 
     tier_month_data['Percentage_Label'] = (
@@ -1501,7 +1459,6 @@ if (
         + '%'
     )
 
-    # MONTH ORDER
     tier_month_data['Month_Str'] = (
         tier_month_data['Month']
         .dt.strftime('%b')
@@ -1516,10 +1473,8 @@ if (
         for m in month_order
     ]
 
-
     if not tier_month_data.empty:
 
-        # TIER ORDER
         existing_tiers = (
             tier_month_data['Tier']
             .dropna()
@@ -1529,7 +1484,6 @@ if (
 
         tier_order = existing_tiers
 
-        # FORCE CONSISTENT TIER ORDER
         tier_month_data['Tier'] = pd.Categorical(
             tier_month_data['Tier'],
             categories=tier_order,
@@ -1544,7 +1498,6 @@ if (
             .reset_index(drop=True)
         )
 
-        # CALCULATE EXACT SEGMENT POSITIONS
         tier_month_data['Segment_End'] = (
             tier_month_data
             .groupby(
@@ -1572,7 +1525,6 @@ if (
             - tier_month_data['Segment_Start']
         )
 
-        # COLORS
         tier_colors = [
             NAVY,
             BLUE,
@@ -1584,7 +1536,6 @@ if (
         while len(tier_colors) < len(tier_order):
             tier_colors.append('#e8e8e8')
 
-        # RENDER (responsive HTML/CSS bars)
         render_stacked_bars(
             tier_month_data,
             'Tier',
@@ -1631,7 +1582,6 @@ if (
         .sum()
     )
 
-    # CALCULATE MONTHLY TOTAL
     month_totals = (
         category_month_data
         .groupby('Month', as_index=False)['Actual_Spends_IDR']
@@ -1648,7 +1598,6 @@ if (
         on='Month'
     )
 
-    # CALCULATE PERCENTAGE
     category_month_data['Percentage'] = (
         category_month_data['Actual_Spends_IDR']
         / category_month_data['Total_Spend']
@@ -1658,7 +1607,7 @@ if (
     category_month_data['Percentage'] = (
         category_month_data['Percentage']
         .round(0)
-        .fillna(0)  # guard against NaN from a 0-total group (0/0)
+        .fillna(0)
     )
 
     category_month_data['Percentage_Label'] = (
@@ -1668,7 +1617,6 @@ if (
         + '%'
     )
 
-    # MONTH ORDER
     category_month_data['Month_Str'] = (
         category_month_data['Month']
         .dt.strftime('%b')
@@ -1683,10 +1631,8 @@ if (
         for m in month_order
     ]
 
-
     if not category_month_data.empty:
 
-        # CATEGORY ORDER
         preferred_category_order = [
             'Lifestyle',
             'Family',
@@ -1718,7 +1664,6 @@ if (
             if c not in category_order:
                 category_order.append(c)
 
-        # FORCE CONSISTENT CATEGORY ORDER
         category_month_data['Category'] = pd.Categorical(
             category_month_data['Category'],
             categories=category_order,
@@ -1733,7 +1678,6 @@ if (
             .reset_index(drop=True)
         )
 
-        # CALCULATE EXACT SEGMENT POSITIONS
         category_month_data['Segment_End'] = (
             category_month_data
             .groupby(
@@ -1761,7 +1705,6 @@ if (
             - category_month_data['Segment_Start']
         )
 
-        # COLORS
         category_colors = [
             NAVY,
             BLUE,
@@ -1778,7 +1721,6 @@ if (
         while len(category_colors) < len(category_order):
             category_colors.append('#e8e8e8')
 
-        # RENDER (responsive HTML/CSS bars)
         render_stacked_bars(
             category_month_data,
             'Category',
@@ -2016,7 +1958,6 @@ if kol_search or search_button:
             search_term
         )
 
-
         if 'KOL_Name' in filtered_df.columns:
 
             search_df = filtered_df.copy()
@@ -2035,7 +1976,6 @@ if kol_search or search_button:
                 )
             ]
 
-
             if not matching_kols.empty:
 
                 unique_kols = (
@@ -2048,7 +1988,6 @@ if kol_search or search_button:
                     f"KOL(s) matching '{kol_search}'"
                 )
 
-
                 for kol_name in unique_kols:
 
                     kol_data = (
@@ -2059,7 +1998,6 @@ if kol_search or search_button:
                         .copy()
                     )
 
-
                     with st.expander(
                         f"{kol_name}",
                         expanded=True
@@ -2067,7 +2005,6 @@ if kol_search or search_button:
 
                         display_kol = kol_data.copy()
 
-                        # FORMAT NUMERIC COLUMNS
                         for col in [
                             'Views',
                             'Reach',
@@ -2084,7 +2021,6 @@ if kol_search or search_button:
                                     .apply(format_number)
                                 )
 
-                        # FORMAT COST (Rp prefix, like CPV)
                         if 'Actual_Spends_IDR' in display_kol.columns:
 
                             display_kol['Actual_Spends_IDR'] = (
@@ -2092,7 +2028,6 @@ if kol_search or search_button:
                                 .apply(format_currency)
                             )
 
-                        # FORMAT ER / ER VIEWS / VR
                         for col in [
                             'ER',
                             'ER_Views',
@@ -2116,7 +2051,6 @@ if kol_search or search_button:
                                     .apply(format_er_display)
                                 )
 
-                        # CALCULATE CPV
                         if 'CPV_Calculated' in display_kol.columns:
 
                             display_kol['CPV'] = (
@@ -2131,7 +2065,6 @@ if kol_search or search_button:
                                 .apply(format_currency_short)
                             )
 
-                        # SELECT COLUMNS
                         display_columns = []
 
                         desired_order = [
@@ -2222,7 +2155,6 @@ if kol_search or search_button:
                                     }
                                 )
 
-                        # FORMAT MONTH
                         if (
                             'Month' in display_df.columns
                             and pd.api.types.is_datetime64_any_dtype(
@@ -2235,7 +2167,6 @@ if kol_search or search_button:
                                 .dt.strftime('%b-%y')
                             )
 
-                        # DISPLAY TABLE
                         kol_table_html = display_df.to_html(
                             escape=False,
                             index=False,
@@ -2333,7 +2264,6 @@ if kol_search or search_button:
                                     "Avg ER",
                                     "N/A"
                                 )
-
 
             else:
 
