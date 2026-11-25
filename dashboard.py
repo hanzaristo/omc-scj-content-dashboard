@@ -88,7 +88,7 @@ def get_logo():
 
 
 # ============ CUT OFF DATE (edit this each month) ============
-CUT_OFF_DATE = "31 June"
+CUT_OFF_DATE = "31 September"
 
 # ============ LOGO (SIDEBAR + COLLAPSED STATE, CLICKABLE) ============
 LOGO_LINK = "https://omc-scj-analytics-hub.netlify.app/"
@@ -1079,15 +1079,19 @@ METRIC_TITLES = {
     'ER': 'Engagement Rate (ER) by Month'
 }
 
-# VR / ER are shown as percentages, everything else as whole numbers
-METRIC_FORMATS = {
-    'Spend': ',.0f',
-    'Views': ',.0f',
-    '# of KOLs': ',.0f',
-    '# of Posts': ',.0f',
-    'VR': '.2%',
-    'ER': '.2%'
+# Count / amount metrics are drawn as grouped bars, % metrics as lines
+LINE_METRICS = ['VR', 'ER']
+
+METRIC_COLORS = {
+    'Spend': NAVY,
+    'Views': BLUE,
+    '# of KOLs': PURPLE,
+    '# of Posts': '#6fcfe0',
+    'VR': MAGENTA,
+    'ER': '#12a594'
 }
+
+MAX_METRICS = 3
 
 
 def compute_monthly_metric(data, metric):
@@ -1141,48 +1145,297 @@ def compute_monthly_metric(data, metric):
     return None
 
 
-metric_col, _metric_spacer = st.columns([1, 3])
+def create_multi_metric_chart(long_df, month_order, metric_order):
+    """Grouped bars (counts / amounts) + lines (% metrics) in one chart.
 
-with metric_col:
-    selected_metric = st.selectbox(
-        "Select metric",
-        METRIC_OPTIONS,
-        key='month_metric'
+    The y axis is hidden: each metric is drawn on its own 0-to-peak scale
+    (the 'Scaled' column), and the real value is shown as a label and in
+    the tooltip. This keeps metrics with very different sizes readable.
+    """
+    n_bars = sum(1 for m in metric_order if m not in LINE_METRICS)
+
+    if len(metric_order) == 1:
+        label_size = 13
+    elif n_bars <= 2:
+        label_size = 11
+    else:
+        label_size = 10
+
+    color_scale = alt.Scale(
+        domain=metric_order,
+        range=[METRIC_COLORS[m] for m in metric_order]
     )
 
-st.markdown(f"""
-<div style="text-align: center; font-size: 18px; font-weight: bold; color: {NAVY}; margin-bottom: 10px;">
-    {METRIC_TITLES[selected_metric]}
-</div>
-""", unsafe_allow_html=True)
+    x_month = alt.X(
+        'Month:O',
+        sort=month_order,
+        axis=alt.Axis(labels=True, title=None, labelAngle=0)
+    )
+    y_scaled = alt.Y(
+        'Scaled:Q',
+        axis=None,
+        scale=alt.Scale(domain=[0, 1.15])
+    )
+    color_legend = alt.Color(
+        'Metric:N',
+        scale=color_scale,
+        legend=alt.Legend(
+            title=None,
+            orient='top',
+            labelFontSize=12,
+            labelFont='Poppins',
+            symbolType='circle'
+        )
+    )
+    color_plain = alt.Color('Metric:N', scale=color_scale, legend=None)
+    tooltip = [
+        alt.Tooltip('Month:O', title='Month'),
+        alt.Tooltip('Metric:N', title='Metric'),
+        alt.Tooltip('Label:N', title='Value')
+    ]
 
+    bar_df = long_df[long_df['Kind'] == 'bar']
+    line_df = long_df[long_df['Kind'] == 'line']
 
-monthly_data = compute_monthly_metric(filtered_df, selected_metric)
+    layers = []
 
+    if not bar_df.empty:
+        bar_metrics = [m for m in metric_order if m not in LINE_METRICS]
+        offset = alt.XOffset('Metric:N', sort=bar_metrics)
 
-if monthly_data is not None and not monthly_data.empty:
+        layers.append(
+            alt.Chart(bar_df).mark_bar(
+                cornerRadiusTopLeft=4,
+                cornerRadiusTopRight=4
+            ).encode(
+                x=x_month,
+                xOffset=offset,
+                y=y_scaled,
+                color=color_legend,
+                tooltip=tooltip
+            )
+        )
 
-    monthly_data = monthly_data.sort_index()
-    monthly_data.index = monthly_data.index.strftime('%b-%y')
+        layers.append(
+            alt.Chart(bar_df).mark_text(
+                align='center',
+                baseline='bottom',
+                dy=-6,
+                fontSize=label_size,
+                fontWeight='bold',
+                font='Poppins',
+                color=NAVY
+            ).encode(
+                x=x_month,
+                xOffset=offset,
+                y=y_scaled,
+                text='Label:N'
+            )
+        )
 
-    chart = create_bar_chart(
-        monthly_data,
-        'Month',
-        'Value',
-        value_format=METRIC_FORMATS[selected_metric],
-        y_title=selected_metric
+    if not line_df.empty:
+        layers.append(
+            alt.Chart(line_df).mark_line(
+                strokeWidth=3,
+                point=alt.OverlayMarkDef(filled=True, size=70)
+            ).encode(
+                x=x_month,
+                y=y_scaled,
+                color=color_legend,
+                tooltip=tooltip
+            )
+        )
+
+        layers.append(
+            alt.Chart(line_df).mark_text(
+                align='center',
+                baseline='bottom',
+                dy=-12,
+                fontSize=label_size,
+                fontWeight='bold',
+                font='Poppins'
+            ).encode(
+                x=x_month,
+                y=y_scaled,
+                text='Label:N',
+                color=color_plain
+            )
+        )
+
+    return alt.layer(*layers).properties(
+        width='container',
+        height=350
+    ).configure_view(
+        strokeWidth=0
+    ).configure_axis(
+        labelFontSize=12,
+        labelFont='Poppins',
+        labelColor='#5b6180',
+        grid=False
     )
 
-    st.altair_chart(
-        chart,
-        use_container_width=True
-    )
+
+# ---- Which metrics may be combined -------------------------------------
+# Metrics that share a unit share one scale, so they stay comparable:
+#   money = Spend | views = Views | count = # of KOLs + # of Posts | rate = VR + ER
+# A chart may hold at most ONE bar group (money / views / count) plus the
+# % lines, and at most MAX_METRICS metrics in total.
+METRIC_SCALE_GROUP = {
+    'Spend': 'money',
+    'Views': 'views',
+    '# of KOLs': 'count',
+    '# of Posts': 'count',
+    'VR': 'rate',
+    'ER': 'rate'
+}
+
+
+def is_valid_metric_combo(metrics):
+    if len(metrics) > MAX_METRICS:
+        return False
+
+    bar_groups = {
+        METRIC_SCALE_GROUP[m]
+        for m in metrics
+        if m not in LINE_METRICS
+    }
+
+    return len(bar_groups) <= 1
+
+
+def metric_state_key(metric):
+    return f"metric_cb_{METRIC_OPTIONS.index(metric)}"
+
+
+# Default selection on first load: Spend only
+if 'metric_defaults_set' not in st.session_state:
+    for _m in METRIC_OPTIONS:
+        st.session_state[metric_state_key(_m)] = (_m == 'Spend')
+    st.session_state['metric_defaults_set'] = True
+
+current_metrics = [
+    m for m in METRIC_OPTIONS
+    if st.session_state.get(metric_state_key(m))
+]
+
+st.markdown("**Select metrics**")
+st.caption(
+    "Greyed-out metrics can't be combined with your current selection "
+    f"(max {MAX_METRICS})."
+)
+
+metric_cols = st.columns(len(METRIC_OPTIONS))
+
+for _col, _m in zip(metric_cols, METRIC_OPTIONS):
+    with _col:
+        st.checkbox(
+            _m,
+            key=metric_state_key(_m),
+            disabled=(
+                _m not in current_metrics
+                and not is_valid_metric_combo(current_metrics + [_m])
+            )
+        )
+
+ordered_metrics = [
+    m for m in METRIC_OPTIONS
+    if st.session_state.get(metric_state_key(m))
+]
+
+if not ordered_metrics:
+
+    st.info("Select at least one metric to display the chart.")
 
 else:
 
-    st.info(
-        f"No data available for {METRIC_TITLES[selected_metric]}"
-    )
+    if len(ordered_metrics) == 1:
+        chart_title = METRIC_TITLES[ordered_metrics[0]]
+    else:
+        chart_title = ", ".join(ordered_metrics) + " by Month"
+
+    st.markdown(f"""
+    <div style="text-align: center; font-size: 18px; font-weight: bold; color: {NAVY}; margin-bottom: 10px;">
+        {chart_title}
+    </div>
+    """, unsafe_allow_html=True)
+
+    series_by_metric = {}
+
+    for metric in ordered_metrics:
+
+        series = compute_monthly_metric(filtered_df, metric)
+
+        if series is not None and not series.empty:
+            series_by_metric[metric] = series.sort_index()
+
+    # One peak per scale group (metrics in the same group share a scale)
+    group_peak = {}
+
+    for metric, series in series_by_metric.items():
+        grp = METRIC_SCALE_GROUP[metric]
+        group_peak[grp] = max(group_peak.get(grp, 0), series.max())
+
+    frames = []
+    month_dates = set()
+
+    for metric, series in series_by_metric.items():
+
+        month_dates.update(series.index)
+
+        is_line = metric in LINE_METRICS
+        peak = group_peak[METRIC_SCALE_GROUP[metric]]
+
+        # Bars use up to 80% of the height and lines up to 95%, so line
+        # labels are less likely to collide with bar labels.
+        top = 0.95 if is_line else 0.80
+        scaled = (series / peak * top) if peak and peak > 0 else series * 0
+
+        if is_line:
+            labels = series.apply(lambda v: f"{v * 100:.2f}%")
+        elif len(ordered_metrics) == 1:
+            labels = series.apply(lambda v: f"{v:,.0f}")
+        else:
+            labels = series.apply(format_number)
+
+        frames.append(pd.DataFrame({
+            'Month': series.index.strftime('%b-%y'),
+            'Metric': metric,
+            'Kind': 'line' if is_line else 'bar',
+            'Value': series.values,
+            'Scaled': scaled.values,
+            'Label': labels.values
+        }))
+
+    if frames:
+
+        long_df = pd.concat(frames, ignore_index=True)
+
+        month_order = [
+            pd.Timestamp(d).strftime('%b-%y')
+            for d in sorted(month_dates)
+        ]
+
+        chart = create_multi_metric_chart(
+            long_df,
+            month_order,
+            [m for m in ordered_metrics if m in set(long_df['Metric'])]
+        )
+
+        st.altair_chart(
+            chart,
+            use_container_width=True
+        )
+
+        if len(set(METRIC_SCALE_GROUP[m] for m in series_by_metric)) > 1:
+            st.caption(
+                "Bars and lines are drawn on separate scales, so compare bar "
+                "heights with other bars and the line with its own trend. "
+                "Hover for exact values."
+            )
+
+    else:
+
+        st.info("No data available for the selected metrics")
 
 
 # ============================================================
@@ -1821,8 +2074,7 @@ if kol_search or search_button:
                             'Likes',
                             'Comments',
                             'Share',
-                            'Followers_Number',
-                            'Actual_Spends_IDR'
+                            'Followers_Number'
                         ]:
 
                             if col in display_kol.columns:
@@ -1831,6 +2083,14 @@ if kol_search or search_button:
                                     display_kol[col]
                                     .apply(format_number)
                                 )
+
+                        # FORMAT COST (Rp prefix, like CPV)
+                        if 'Actual_Spends_IDR' in display_kol.columns:
+
+                            display_kol['Actual_Spends_IDR'] = (
+                                display_kol['Actual_Spends_IDR']
+                                .apply(format_currency)
+                            )
 
                         # FORMAT ER / ER VIEWS / VR
                         for col in [
@@ -2210,11 +2470,16 @@ for col in [
     'Likes',
     'Comments',
     'Share',
-    'Followers_Number',
-    'Actual_Spends_IDR'
+    'Followers_Number'
 ]:
     if col in display_full_df.columns:
         display_full_df[col] = display_full_df[col].apply(format_number)
+
+# Format cost (Rp prefix, like CPV)
+if 'Actual_Spends_IDR' in display_full_df.columns:
+    display_full_df['Actual_Spends_IDR'] = (
+        display_full_df['Actual_Spends_IDR'].apply(format_currency)
+    )
 
 # Format percent columns (same scale handling as the KOL search table)
 for col in ['ER', 'ER_Views', 'VR']:
